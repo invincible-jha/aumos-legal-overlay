@@ -18,7 +18,15 @@ from aumos_common.auth import TenantContext
 from aumos_common.errors import NotFoundError, ValidationError
 from aumos_common.observability import get_logger
 
+from aumos_legal_overlay.adapters.clause_validator import ClauseValidator
+from aumos_legal_overlay.adapters.contract_synthesizer import ContractSynthesizer
+from aumos_legal_overlay.adapters.ip_protector import IPProtector
 from aumos_legal_overlay.adapters.kafka import LegalDomainEventPublisher
+from aumos_legal_overlay.adapters.legal_hold_manager import LegalHoldManager
+from aumos_legal_overlay.adapters.liability_assessor import LiabilityAssessor
+from aumos_legal_overlay.adapters.litigation_support import LitigationSupport
+from aumos_legal_overlay.adapters.privilege_preserver import PrivilegePreserver
+from aumos_legal_overlay.adapters.regulatory_monitor import RegulatoryMonitor
 from aumos_legal_overlay.core.interfaces import (
     IAuditTrailRepository,
     IEDiscoveryJobRepository,
@@ -752,3 +760,802 @@ class LegalHoldService:
         )
 
         return updated  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# New services wiring Phase 5 legal overlay adapters
+# ---------------------------------------------------------------------------
+
+
+class ContractSynthesisService:
+    """Generates synthetic legal contracts for AI training and analysis.
+
+    Wraps the ContractSynthesizer adapter, publishes events on contract
+    generation, and logs batch synthesis operations.
+
+    Args:
+        synthesizer: ContractSynthesizer adapter instance.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        synthesizer: ContractSynthesizer,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize contract synthesis service.
+
+        Args:
+            synthesizer: ContractSynthesizer adapter.
+            event_publisher: Domain event publisher.
+        """
+        self._synthesizer = synthesizer
+        self._event_publisher = event_publisher
+
+    async def synthesize_contract(
+        self,
+        contract_type: str,
+        jurisdiction: str,
+        complexity: str,
+        party_count: int,
+        tenant: TenantContext,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Synthesize a single legal contract and publish an event.
+
+        Args:
+            contract_type: Contract type identifier (NDA, MSA, SLA, etc.).
+            jurisdiction: Legal jurisdiction for language adaptation.
+            complexity: Clause complexity level (simple, standard, complex).
+            party_count: Number of contract parties.
+            tenant: Tenant context for RLS isolation.
+            metadata: Optional metadata dict.
+
+        Returns:
+            Contract dict with contract_id, assembled_text, and metadata.
+        """
+        logger.info(
+            "Synthesizing contract",
+            contract_type=contract_type,
+            jurisdiction=jurisdiction,
+            complexity=complexity,
+            tenant_id=str(tenant.tenant_id),
+        )
+        contract = await self._synthesizer.synthesize_contract(
+            contract_type=contract_type,
+            jurisdiction=jurisdiction,
+            complexity=complexity,
+            party_count=party_count,
+            metadata=metadata,
+        )
+        await self._event_publisher.publish(
+            topic="legal.contract.synthesized",
+            payload={
+                "tenant_id": str(tenant.tenant_id),
+                "contract_id": contract["contract_id"],
+                "contract_type": contract_type,
+                "jurisdiction": jurisdiction,
+                "word_count": contract.get("word_count", 0),
+            },
+        )
+        return contract
+
+    async def synthesize_batch(
+        self,
+        count: int,
+        contract_types: list[str] | None,
+        tenant: TenantContext,
+    ) -> list[dict]:
+        """Generate a batch of synthetic contracts.
+
+        Args:
+            count: Number of contracts to generate.
+            contract_types: Optional list of contract types to draw from.
+            tenant: Tenant context for RLS isolation.
+
+        Returns:
+            List of contract dicts.
+        """
+        logger.info(
+            "Synthesizing contract batch",
+            count=count,
+            tenant_id=str(tenant.tenant_id),
+        )
+        contracts = await self._synthesizer.generate_batch(
+            count=count,
+            contract_types=contract_types,
+        )
+        await self._event_publisher.publish(
+            topic="legal.contract.batch_synthesized",
+            payload={
+                "tenant_id": str(tenant.tenant_id),
+                "count": len(contracts),
+            },
+        )
+        return contracts
+
+
+class ClauseValidationService:
+    """Validates contract clauses for regulatory compliance.
+
+    Wraps the ClauseValidator adapter, logs validation results, and
+    publishes events for non-compliant contracts.
+
+    Args:
+        validator: ClauseValidator adapter instance.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        validator: ClauseValidator,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize clause validation service.
+
+        Args:
+            validator: ClauseValidator adapter.
+            event_publisher: Domain event publisher.
+        """
+        self._validator = validator
+        self._event_publisher = event_publisher
+
+    async def validate_contract(
+        self,
+        contract_id: str,
+        contract_type: str,
+        clauses: list[dict],
+        jurisdiction: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Validate a contract's clauses and publish the result.
+
+        Args:
+            contract_id: Unique identifier of the contract.
+            contract_type: Contract type for validation rules.
+            clauses: List of clause dicts with clause_type and text.
+            jurisdiction: Legal jurisdiction for compliance rules.
+            tenant: Tenant context for RLS isolation.
+
+        Returns:
+            ValidationReport-compatible dict.
+        """
+        logger.info(
+            "Validating contract clauses",
+            contract_id=contract_id,
+            contract_type=contract_type,
+            clause_count=len(clauses),
+            tenant_id=str(tenant.tenant_id),
+        )
+        report = await self._validator.validate_contract(
+            contract_id=contract_id,
+            contract_type=contract_type,
+            clauses=clauses,
+            jurisdiction=jurisdiction,
+        )
+        if not report.get("is_compliant", True):
+            await self._event_publisher.publish(
+                topic="legal.contract.compliance_violation_detected",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "contract_id": contract_id,
+                    "violation_count": report.get("violation_count", 0),
+                    "missing_clause_count": report.get("missing_clause_count", 0),
+                },
+            )
+        return report
+
+
+class LiabilityAssessmentService:
+    """Assesses AI system liability exposure across legal frameworks.
+
+    Wraps the LiabilityAssessor adapter and publishes events for high-risk
+    liability assessments.
+
+    Args:
+        assessor: LiabilityAssessor adapter instance.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        assessor: LiabilityAssessor,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize liability assessment service.
+
+        Args:
+            assessor: LiabilityAssessor adapter.
+            event_publisher: Domain event publisher.
+        """
+        self._assessor = assessor
+        self._event_publisher = event_publisher
+
+    async def assess_liability(
+        self,
+        system_id: str,
+        ai_domain: str,
+        deployment_context: str,
+        jurisdiction: str,
+        tenant: TenantContext,
+        claimed_damages_usd: float | None = None,
+    ) -> dict:
+        """Perform a liability assessment and publish result event.
+
+        Args:
+            system_id: Unique AI system identifier.
+            ai_domain: AI application domain.
+            deployment_context: Deployment context (enterprise, consumer, critical).
+            jurisdiction: Legal jurisdiction for framework selection.
+            tenant: Tenant context for RLS isolation.
+            claimed_damages_usd: Optional claimed damages amount.
+
+        Returns:
+            LiabilityAssessmentReport-compatible dict.
+
+        Raises:
+            ValidationError: If required parameters are invalid.
+        """
+        if not system_id:
+            raise ValidationError("system_id is required for liability assessment")
+
+        logger.info(
+            "Assessing AI liability",
+            system_id=system_id,
+            ai_domain=ai_domain,
+            deployment_context=deployment_context,
+            tenant_id=str(tenant.tenant_id),
+        )
+        report = await self._assessor.assess(
+            system_id=system_id,
+            ai_domain=ai_domain,
+            deployment_context=deployment_context,
+            jurisdiction=jurisdiction,
+            claimed_damages_usd=claimed_damages_usd,
+        )
+        risk_level = report.get("overall_risk_level", "low")
+        if risk_level in ("high", "critical"):
+            await self._event_publisher.publish(
+                topic="legal.liability.high_risk_assessment",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "system_id": system_id,
+                    "risk_level": risk_level,
+                    "max_exposure_usd": report.get("max_exposure_usd", 0),
+                },
+            )
+        return report
+
+
+class IPProtectionService_Legal:
+    """Manages IP asset registration and infringement risk for legal teams.
+
+    Distinct from the manufacturing IPProtectionService, this service
+    focuses on legal IP portfolio management and AI training data risk.
+
+    Args:
+        protector: IPProtector adapter instance.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        protector: IPProtector,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize IP protection legal service.
+
+        Args:
+            protector: IPProtector adapter.
+            event_publisher: Domain event publisher.
+        """
+        self._protector = protector
+        self._event_publisher = event_publisher
+
+    async def register_asset(
+        self,
+        asset_name: str,
+        asset_type: str,
+        owner: str,
+        description: str,
+        tenant: TenantContext,
+        filing_date: str | None = None,
+    ) -> dict:
+        """Register an IP asset and publish a registration event.
+
+        Args:
+            asset_name: Name of the IP asset.
+            asset_type: Type of IP (patent, trademark, copyright, trade_secret).
+            owner: IP owner name or identifier.
+            description: Description of the IP asset.
+            tenant: Tenant context for RLS isolation.
+            filing_date: Optional filing or registration date.
+
+        Returns:
+            IPAsset-compatible dict.
+        """
+        logger.info(
+            "Registering IP asset",
+            asset_name=asset_name,
+            asset_type=asset_type,
+            owner=owner,
+            tenant_id=str(tenant.tenant_id),
+        )
+        asset = await self._protector.register_asset(
+            asset_name=asset_name,
+            asset_type=asset_type,
+            owner=owner,
+            description=description,
+            filing_date=filing_date,
+        )
+        await self._event_publisher.publish(
+            topic="legal.ip.asset_registered",
+            payload={
+                "tenant_id": str(tenant.tenant_id),
+                "asset_id": asset.get("asset_id"),
+                "asset_name": asset_name,
+                "asset_type": asset_type,
+            },
+        )
+        return asset
+
+    async def assess_infringement_risk(
+        self,
+        model_description: str,
+        training_data_sources: list[str],
+        use_case: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Assess IP infringement risk for an AI model and publish a risk event.
+
+        Args:
+            model_description: Description of the AI model.
+            training_data_sources: Data sources used for training.
+            use_case: Intended use case.
+            tenant: Tenant context for RLS isolation.
+
+        Returns:
+            InfringementRiskAssessment-compatible dict.
+        """
+        logger.info(
+            "Assessing infringement risk",
+            use_case=use_case,
+            source_count=len(training_data_sources),
+            tenant_id=str(tenant.tenant_id),
+        )
+        assessment = await self._protector.assess_infringement_risk(
+            model_description=model_description,
+            training_data_sources=training_data_sources,
+            use_case=use_case,
+        )
+        risk_level = assessment.get("overall_risk_level", "low")
+        if risk_level in ("high", "critical"):
+            await self._event_publisher.publish(
+                topic="legal.ip.high_infringement_risk_detected",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "risk_level": risk_level,
+                    "use_case": use_case,
+                    "violation_count": assessment.get("potential_violations_count", 0),
+                },
+            )
+        return assessment
+
+
+class RegulatoryMonitoringService:
+    """Monitors AI regulatory developments and dispatches compliance alerts.
+
+    Wraps the RegulatoryMonitor adapter, publishes events for critical
+    regulatory changes, and coordinates alert dispatch workflows.
+
+    Args:
+        monitor: RegulatoryMonitor adapter instance.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        monitor: RegulatoryMonitor,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize regulatory monitoring service.
+
+        Args:
+            monitor: RegulatoryMonitor adapter.
+            event_publisher: Domain event publisher.
+        """
+        self._monitor = monitor
+        self._event_publisher = event_publisher
+
+    async def track_regulatory_changes(
+        self,
+        sector: str,
+        tenant: TenantContext,
+        jurisdiction: str | None = None,
+    ) -> dict:
+        """Monitor regulatory feeds and generate a landscape report.
+
+        Args:
+            sector: Business sector for relevance filtering.
+            tenant: Tenant context for RLS isolation.
+            jurisdiction: Optional jurisdiction filter.
+
+        Returns:
+            RegulatoryLandscapeReport-compatible dict.
+        """
+        logger.info(
+            "Tracking regulatory changes",
+            sector=sector,
+            jurisdiction=jurisdiction,
+            tenant_id=str(tenant.tenant_id),
+        )
+        report = await self._monitor.track_regulatory_changes(
+            sector=sector,
+            jurisdiction=jurisdiction,
+        )
+        critical_alerts = [
+            a for a in report.get("alerts", [])
+            if a.get("impact_level") == "critical"
+        ]
+        if critical_alerts:
+            await self._event_publisher.publish(
+                topic="legal.regulatory.critical_alert",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "critical_alert_count": len(critical_alerts),
+                    "sector": sector,
+                },
+            )
+        return report
+
+
+class LitigationSupportService_Legal:
+    """Manages e-discovery workflows, TAR scoring, and production packages.
+
+    Wraps the LitigationSupport adapter, maintains case state, and
+    publishes events for production package creation.
+
+    Args:
+        support: LitigationSupport adapter instance.
+        ediscovery_repository: Repository for e-discovery job persistence.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        support: LitigationSupport,
+        ediscovery_repository: IEDiscoveryJobRepository,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize litigation support service.
+
+        Args:
+            support: LitigationSupport adapter.
+            ediscovery_repository: Repository for e-discovery records.
+            event_publisher: Domain event publisher.
+        """
+        self._support = support
+        self._ediscovery_repo = ediscovery_repository
+        self._event_publisher = event_publisher
+
+    async def collect_document(
+        self,
+        document_id: str,
+        document_type: str,
+        content_text: str,
+        custodian: str,
+        case_number: str,
+        tenant: TenantContext,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Collect a document into the e-discovery corpus.
+
+        Args:
+            document_id: Unique document identifier.
+            document_type: Document type (email, memo, contract, etc.).
+            content_text: Full text content.
+            custodian: Custodian who produced the document.
+            case_number: Associated case number.
+            tenant: Tenant context for RLS isolation.
+            metadata: Optional additional metadata.
+
+        Returns:
+            DocumentRecord-compatible dict.
+        """
+        logger.info(
+            "Collecting e-discovery document",
+            document_id=document_id,
+            case_number=case_number,
+            custodian=custodian,
+            tenant_id=str(tenant.tenant_id),
+        )
+        doc_record = await self._support.collect_document(
+            document_id=document_id,
+            document_type=document_type,
+            content_text=content_text,
+            custodian=custodian,
+            case_number=case_number,
+            metadata=metadata,
+        )
+        return doc_record
+
+    async def create_production_package(
+        self,
+        case_number: str,
+        production_format: str,
+        tenant: TenantContext,
+        include_privileged: bool = False,
+    ) -> dict:
+        """Create a production package and publish a completion event.
+
+        Args:
+            case_number: Case number for the production.
+            production_format: Output format (concordance, summation, native, pdf).
+            tenant: Tenant context for RLS isolation.
+            include_privileged: Whether to include privileged documents.
+
+        Returns:
+            ProductionPackage-compatible dict.
+        """
+        logger.info(
+            "Creating production package",
+            case_number=case_number,
+            production_format=production_format,
+            tenant_id=str(tenant.tenant_id),
+        )
+        package = await self._support.create_production(
+            case_number=case_number,
+            production_format=production_format,
+            include_privileged=include_privileged,
+        )
+        await self._event_publisher.publish(
+            topic="legal.ediscovery.production_package_created",
+            payload={
+                "tenant_id": str(tenant.tenant_id),
+                "case_number": case_number,
+                "production_id": package.get("production_id"),
+                "document_count": package.get("document_count", 0),
+                "production_format": production_format,
+            },
+        )
+        return package
+
+
+class PrivilegePreservationService:
+    """Manages attorney-client privilege classification and clawback workflows.
+
+    Wraps the PrivilegePreserver adapter and integrates with the existing
+    PrivilegeService to coordinate privilege checks with document classification.
+
+    Args:
+        preserver: PrivilegePreserver adapter instance.
+        privilege_repository: Repository for privilege check records.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        preserver: PrivilegePreserver,
+        privilege_repository: IPrivilegeCheckRepository,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize privilege preservation service.
+
+        Args:
+            preserver: PrivilegePreserver adapter.
+            privilege_repository: Repository for privilege check persistence.
+            event_publisher: Domain event publisher.
+        """
+        self._preserver = preserver
+        self._privilege_repo = privilege_repository
+        self._event_publisher = event_publisher
+
+    async def classify_and_record(
+        self,
+        document_id: str,
+        document_type: str,
+        content_text: str,
+        tenant: TenantContext,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Classify document privilege and persist the result.
+
+        Args:
+            document_id: Unique document identifier.
+            document_type: Document type.
+            content_text: Full text content.
+            tenant: Tenant context for RLS isolation.
+            metadata: Optional metadata.
+
+        Returns:
+            PrivilegeClassification-compatible dict.
+        """
+        logger.info(
+            "Classifying document privilege",
+            document_id=document_id,
+            document_type=document_type,
+            tenant_id=str(tenant.tenant_id),
+        )
+        classification = await self._preserver.classify_document(
+            document_id=document_id,
+            document_type=document_type,
+            content_text=content_text,
+            metadata=metadata,
+        )
+        if classification.get("is_privileged"):
+            await self._event_publisher.publish(
+                topic="legal.privilege.document_classified_privileged",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "document_id": document_id,
+                    "privilege_type": classification.get("privilege_type"),
+                    "confidence_score": classification.get("confidence_score", 0),
+                },
+            )
+        return classification
+
+    async def handle_inadvertent_disclosure(
+        self,
+        document_id: str,
+        disclosed_to: str,
+        disclosure_date: str,
+        tenant: TenantContext,
+        case_number: str | None = None,
+    ) -> dict:
+        """Initiate clawback for inadvertently disclosed privileged material.
+
+        Args:
+            document_id: Identifier of the disclosed document.
+            disclosed_to: Receiving party.
+            disclosure_date: Date of disclosure.
+            tenant: Tenant context for RLS isolation.
+            case_number: Optional associated case number.
+
+        Returns:
+            ClawbackRequest-compatible dict.
+        """
+        logger.info(
+            "Initiating clawback for inadvertent disclosure",
+            document_id=document_id,
+            disclosed_to=disclosed_to,
+            tenant_id=str(tenant.tenant_id),
+        )
+        clawback = await self._preserver.initiate_clawback(
+            document_id=document_id,
+            disclosed_to=disclosed_to,
+            disclosure_date=disclosure_date,
+            case_number=case_number,
+        )
+        await self._event_publisher.publish(
+            topic="legal.privilege.clawback_initiated",
+            payload={
+                "tenant_id": str(tenant.tenant_id),
+                "document_id": document_id,
+                "clawback_id": clawback.get("clawback_id"),
+                "disclosed_to": disclosed_to,
+            },
+        )
+        return clawback
+
+
+class LegalHoldLifecycleService:
+    """Manages the full lifecycle of legal holds including compliance tracking.
+
+    Complements the existing LegalHoldService (which manages DB records)
+    by wrapping the LegalHoldManager adapter for notice generation,
+    custodian tracking, and compliance monitoring workflows.
+
+    Args:
+        manager: LegalHoldManager adapter instance.
+        hold_repository: Repository for legal hold record persistence.
+        event_publisher: Domain event publisher for legal events.
+    """
+
+    def __init__(
+        self,
+        manager: LegalHoldManager,
+        hold_repository: ILegalHoldRepository,
+        event_publisher: LegalDomainEventPublisher,
+    ) -> None:
+        """Initialize legal hold lifecycle service.
+
+        Args:
+            manager: LegalHoldManager adapter.
+            hold_repository: Repository for legal hold records.
+            event_publisher: Domain event publisher.
+        """
+        self._manager = manager
+        self._hold_repo = hold_repository
+        self._event_publisher = event_publisher
+
+    async def create_and_issue_hold(
+        self,
+        hold_name: str,
+        case_name: str,
+        matter_type: str,
+        issuing_attorney: str,
+        custodians: list[str],
+        data_sources: list[str],
+        tenant: TenantContext,
+        case_number: str | None = None,
+    ) -> dict:
+        """Create a legal hold using the manager adapter and publish an event.
+
+        Args:
+            hold_name: Descriptive name for the hold.
+            case_name: Associated legal matter name.
+            matter_type: Type of legal matter (litigation, investigation, etc.).
+            issuing_attorney: Name of the issuing attorney.
+            custodians: List of custodian identifiers.
+            data_sources: List of data sources to preserve.
+            tenant: Tenant context for RLS isolation.
+            case_number: Optional official case number.
+
+        Returns:
+            LegalHoldRecord-compatible dict from the manager adapter.
+
+        Raises:
+            ValidationError: If custodians or data_sources are empty.
+        """
+        if not custodians:
+            raise ValidationError("At least one custodian is required")
+        if not data_sources:
+            raise ValidationError("At least one data source must be specified")
+
+        logger.info(
+            "Creating legal hold via manager adapter",
+            hold_name=hold_name,
+            case_name=case_name,
+            matter_type=matter_type,
+            custodian_count=len(custodians),
+            tenant_id=str(tenant.tenant_id),
+        )
+        hold_record = await self._manager.create_hold(
+            hold_name=hold_name,
+            case_name=case_name,
+            matter_type=matter_type,
+            issuing_attorney=issuing_attorney,
+            custodians=custodians,
+            data_sources=data_sources,
+            case_number=case_number,
+        )
+        await self._event_publisher.publish_legal_hold_created(
+            tenant_id=tenant.tenant_id,
+            hold_id=uuid.UUID(hold_record.get("hold_id", str(uuid.uuid4()))),
+            hold_name=hold_name,
+            custodians=custodians,
+            correlation_id=str(uuid.uuid4()),
+        )
+        return hold_record
+
+    async def monitor_and_send_reminders(
+        self,
+        hold_id: str,
+        tenant: TenantContext,
+    ) -> dict:
+        """Monitor compliance and send reminders to unacknowledged custodians.
+
+        Args:
+            hold_id: Legal hold unique identifier.
+            tenant: Tenant context for RLS isolation.
+
+        Returns:
+            Compliance status dict with pending and reminded custodians.
+        """
+        logger.info(
+            "Monitoring hold compliance",
+            hold_id=hold_id,
+            tenant_id=str(tenant.tenant_id),
+        )
+        compliance = await self._manager.monitor_compliance(hold_id=hold_id)
+        pending_count = len(compliance.get("pending_custodians", []))
+        if pending_count > 0:
+            await self._event_publisher.publish(
+                topic="legal.hold.reminder_dispatched",
+                payload={
+                    "tenant_id": str(tenant.tenant_id),
+                    "hold_id": hold_id,
+                    "pending_count": pending_count,
+                },
+            )
+        return compliance

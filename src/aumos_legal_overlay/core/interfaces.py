@@ -222,4 +222,401 @@ __all__ = [
     "IAuditTrailRepository",
     "IPrivilegeLogRepository",
     "ILegalHoldRepository",
+    "IContractSynthesizerProtocol",
+    "IClauseValidatorProtocol",
+    "ILiabilityAssessorProtocol",
+    "IIPProtectorProtocol",
+    "IRegulatoryMonitorProtocol",
+    "ILitigationSupportProtocol",
+    "IPrivilegePreserverProtocol",
+    "ILegalHoldManagerProtocol",
 ]
+
+
+# ---------------------------------------------------------------------------
+# New adapter protocols for Phase 5 legal overlay extensions
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class IContractSynthesizerProtocol(Protocol):
+    """Protocol for synthetic legal contract generation.
+
+    Implementations generate realistic legal documents (NDA, MSA, SLA,
+    Employment, Vendor) for AI training data and contract analysis systems.
+    """
+
+    async def synthesize_contract(
+        self,
+        contract_type: str,
+        jurisdiction: str = "US-NY",
+        complexity: str = "standard",
+        party_count: int = 2,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Synthesize a single legal contract document.
+
+        Args:
+            contract_type: Type of contract to generate (NDA, MSA, SLA, etc.).
+            jurisdiction: Legal jurisdiction for language adaptation.
+            complexity: Clause complexity level (simple, standard, complex).
+            party_count: Number of contract parties.
+            metadata: Optional metadata to attach to the contract.
+
+        Returns:
+            Dict with contract_id, assembled_text, sections, and metadata.
+        """
+        ...
+
+    async def generate_batch(
+        self,
+        count: int,
+        contract_types: list[str] | None = None,
+    ) -> list[dict]:
+        """Generate a batch of synthetic contracts.
+
+        Args:
+            count: Number of contracts to generate.
+            contract_types: Optional list of contract types to draw from.
+
+        Returns:
+            List of contract dicts.
+        """
+        ...
+
+
+@runtime_checkable
+class IClauseValidatorProtocol(Protocol):
+    """Protocol for legal clause compliance validation.
+
+    Implementations validate contract clauses against applicable regulations,
+    detect missing required clauses, and identify conflicting clauses.
+    """
+
+    async def validate_contract(
+        self,
+        contract_id: str,
+        contract_type: str,
+        clauses: list[dict],
+        jurisdiction: str = "US-NY",
+    ) -> dict:
+        """Validate all clauses in a contract for regulatory compliance.
+
+        Args:
+            contract_id: Unique identifier of the contract.
+            contract_type: Type of contract being validated.
+            clauses: List of clause dicts with clause_type and text.
+            jurisdiction: Jurisdiction for compliance checking.
+
+        Returns:
+            ValidationReport-compatible dict with compliance status and findings.
+        """
+        ...
+
+    async def score_clause(
+        self,
+        clause_type: str,
+        clause_text: str,
+        jurisdiction: str = "US-NY",
+    ) -> dict:
+        """Score a single clause for regulatory compliance.
+
+        Args:
+            clause_type: Type/category of the clause.
+            clause_text: Full text of the clause to evaluate.
+            jurisdiction: Applicable legal jurisdiction.
+
+        Returns:
+            ClauseComplianceResult-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class ILiabilityAssessorProtocol(Protocol):
+    """Protocol for AI-specific liability assessment.
+
+    Implementations evaluate liability exposure across legal frameworks
+    (negligence, strict liability, product liability) for AI systems.
+    """
+
+    async def assess(
+        self,
+        system_id: str,
+        ai_domain: str,
+        deployment_context: str,
+        jurisdiction: str = "US",
+        claimed_damages_usd: float | None = None,
+    ) -> dict:
+        """Perform a full liability assessment for an AI system.
+
+        Args:
+            system_id: Unique identifier for the AI system.
+            ai_domain: AI application domain (medical, financial, autonomous, etc.).
+            deployment_context: Deployment context (enterprise, consumer, critical).
+            jurisdiction: Legal jurisdiction for framework selection.
+            claimed_damages_usd: Optional claimed damages for exposure modeling.
+
+        Returns:
+            LiabilityAssessmentReport-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class IIPProtectorProtocol(Protocol):
+    """Protocol for intellectual property protection analysis.
+
+    Implementations manage IP asset registration, infringement risk
+    assessment, model IP classification, and portfolio reporting for AI.
+    """
+
+    async def register_asset(
+        self,
+        asset_name: str,
+        asset_type: str,
+        owner: str,
+        description: str,
+        filing_date: str | None = None,
+    ) -> dict:
+        """Register a new IP asset in the protection registry.
+
+        Args:
+            asset_name: Name of the IP asset.
+            asset_type: Type of IP (patent, trademark, copyright, trade_secret).
+            owner: Name or ID of the IP owner.
+            description: Description of the IP asset.
+            filing_date: Optional filing or registration date.
+
+        Returns:
+            IPAsset-compatible dict.
+        """
+        ...
+
+    async def assess_infringement_risk(
+        self,
+        model_description: str,
+        training_data_sources: list[str],
+        use_case: str,
+    ) -> dict:
+        """Assess infringement risk for a proposed AI model or use case.
+
+        Args:
+            model_description: Description of the AI model.
+            training_data_sources: List of data sources used for training.
+            use_case: Intended use case for the model.
+
+        Returns:
+            InfringementRiskAssessment-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class IRegulatoryMonitorProtocol(Protocol):
+    """Protocol for AI regulatory monitoring and alerting.
+
+    Implementations track emerging AI regulations, score relevance to
+    specific sectors, and dispatch compliance alerts to stakeholders.
+    """
+
+    async def track_regulatory_changes(
+        self,
+        sector: str = "general",
+        jurisdiction: str | None = None,
+    ) -> dict:
+        """Monitor regulatory feeds and generate landscape report.
+
+        Args:
+            sector: Business sector for relevance filtering.
+            jurisdiction: Optional jurisdiction filter.
+
+        Returns:
+            RegulatoryLandscapeReport-compatible dict.
+        """
+        ...
+
+    async def generate_alert(
+        self,
+        regulation_id: str,
+        impact_level: str,
+        sector: str,
+    ) -> dict:
+        """Generate a regulatory alert for a specific regulation.
+
+        Args:
+            regulation_id: Regulation identifier.
+            impact_level: Impact level (critical, high, medium, low).
+            sector: Target sector for the alert.
+
+        Returns:
+            RegulatoryAlert-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class ILitigationSupportProtocol(Protocol):
+    """Protocol for e-discovery litigation support.
+
+    Implementations manage document collection, privilege review, TAR
+    (Technology Assisted Review) scoring, and production package creation.
+    """
+
+    async def collect_document(
+        self,
+        document_id: str,
+        document_type: str,
+        content_text: str,
+        custodian: str,
+        case_number: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Collect a document into the e-discovery corpus.
+
+        Args:
+            document_id: Unique document identifier.
+            document_type: Type of document (email, memo, contract, etc.).
+            content_text: Text content of the document.
+            custodian: Custodian who produced the document.
+            case_number: Associated case number.
+            metadata: Optional additional metadata.
+
+        Returns:
+            DocumentRecord-compatible dict.
+        """
+        ...
+
+    async def create_production(
+        self,
+        case_number: str,
+        production_format: str = "concordance",
+        include_privileged: bool = False,
+    ) -> dict:
+        """Create a production package for a case.
+
+        Args:
+            case_number: Case number to create production for.
+            production_format: Output format (concordance, summation, native, pdf).
+            include_privileged: Whether to include privileged documents.
+
+        Returns:
+            ProductionPackage-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class IPrivilegePreserverProtocol(Protocol):
+    """Protocol for attorney-client privilege preservation.
+
+    Implementations classify documents for privilege, maintain privilege
+    logs, perform redactions, and handle inadvertent disclosure clawbacks.
+    """
+
+    async def classify_document(
+        self,
+        document_id: str,
+        document_type: str,
+        content_text: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Classify a document for attorney-client or work product privilege.
+
+        Args:
+            document_id: Unique document identifier.
+            document_type: Type of document.
+            content_text: Full text content.
+            metadata: Optional document metadata.
+
+        Returns:
+            PrivilegeClassification-compatible dict.
+        """
+        ...
+
+    async def initiate_clawback(
+        self,
+        document_id: str,
+        disclosed_to: str,
+        disclosure_date: str,
+        case_number: str | None = None,
+    ) -> dict:
+        """Initiate a clawback request for inadvertently disclosed privileged material.
+
+        Args:
+            document_id: Identifier of the inadvertently disclosed document.
+            disclosed_to: Party to whom the document was disclosed.
+            disclosure_date: Date of the disclosure.
+            case_number: Optional associated case number.
+
+        Returns:
+            ClawbackRequest-compatible dict.
+        """
+        ...
+
+
+@runtime_checkable
+class ILegalHoldManagerProtocol(Protocol):
+    """Protocol for legal hold lifecycle management.
+
+    Implementations manage hold creation, custodian notification,
+    acknowledgement tracking, compliance monitoring, and hold release.
+    """
+
+    async def create_hold(
+        self,
+        hold_name: str,
+        case_name: str,
+        matter_type: str,
+        issuing_attorney: str,
+        custodians: list[str],
+        data_sources: list[str],
+        case_number: str | None = None,
+    ) -> dict:
+        """Create and issue a new legal hold.
+
+        Args:
+            hold_name: Descriptive name for the legal hold.
+            case_name: Associated legal matter name.
+            matter_type: Type of legal matter.
+            issuing_attorney: Name of the issuing attorney.
+            custodians: List of custodian identifiers.
+            data_sources: List of data sources to preserve.
+            case_number: Optional official case number.
+
+        Returns:
+            LegalHoldRecord-compatible dict.
+        """
+        ...
+
+    async def monitor_compliance(
+        self,
+        hold_id: str,
+    ) -> dict:
+        """Monitor custodian compliance status for a legal hold.
+
+        Args:
+            hold_id: Unique identifier of the legal hold.
+
+        Returns:
+            Dict with compliance_fraction, pending_custodians, and overdue_custodians.
+        """
+        ...
+
+    async def release_hold(
+        self,
+        hold_id: str,
+        release_reason: str,
+        releasing_attorney: str,
+    ) -> dict:
+        """Release a legal hold and notify custodians.
+
+        Args:
+            hold_id: Unique identifier of the hold to release.
+            release_reason: Documented reason for release.
+            releasing_attorney: Name of the attorney authorizing release.
+
+        Returns:
+            Updated LegalHoldRecord-compatible dict.
+        """
+        ...
