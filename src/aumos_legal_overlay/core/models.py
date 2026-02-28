@@ -12,7 +12,7 @@ Table naming convention: lgl_{table_name}
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, Integer, String, Text
+from sqlalchemy import Boolean, Date, Float, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -160,10 +160,219 @@ class LegalHold(AumOSModel):
     hold_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
+class TARProject(AumOSModel):
+    """Technology-Assisted Review project tracking CAL lifecycle.
+
+    Manages the full TAR/CAL workflow from seed collection through
+    TREC Total Recall validation and elusion testing.
+
+    Table: lgl_tar_projects
+    """
+
+    __tablename__ = "lgl_tar_projects"
+
+    case_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    case_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    ediscovery_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="seed_collection"
+    )  # seed_collection | training | review | validated
+    target_recall: Mapped[float] = mapped_column(Float, nullable=False, default=0.85)
+    estimated_recall: Mapped[float | None] = mapped_column(Float, nullable=True)
+    corpus_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reviewed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relevant_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    elusion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elusion_passes_threshold: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    model_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    project_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class TARBatch(AumOSModel):
+    """A review batch within a TAR project.
+
+    Records each ranked batch of documents sent to reviewers
+    for relevance judgments under the CAL protocol.
+
+    Table: lgl_tar_batches
+    """
+
+    __tablename__ = "lgl_tar_batches"
+
+    tar_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    batch_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewer_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending"
+    )  # pending | in_review | completed
+    document_ids: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
+    relevance_scores: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class TARDocumentReview(AumOSModel):
+    """Individual relevance judgment for a document in TAR review.
+
+    Table: lgl_tar_document_reviews
+    """
+
+    __tablename__ = "lgl_tar_document_reviews"
+
+    tar_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    tar_batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    predicted_relevance_score: Mapped[float] = mapped_column(Float, nullable=False)
+    reviewer_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_relevant: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    is_seed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class LGLProductionSet(AumOSModel):
+    """FRCP 34-compliant document production set with Bates numbering.
+
+    Table: lgl_production_sets
+    """
+
+    __tablename__ = "lgl_production_sets"
+
+    case_number: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    requesting_party: Mapped[str] = mapped_column(String(255), nullable=False)
+    producing_party: Mapped[str] = mapped_column(String(255), nullable=False)
+    bates_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
+    bates_start: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    bates_padding: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="draft"
+    )  # draft | finalized | served
+    total_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_produced: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_withheld: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    production_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class LGLProductionDocument(AumOSModel):
+    """A single document in a production set with Bates number assigned.
+
+    Table: lgl_production_documents
+    """
+
+    __tablename__ = "lgl_production_documents"
+
+    production_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    bates_number: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    privilege_status: Mapped[str] = mapped_column(
+        String(30), nullable=False
+    )  # produced | withheld | redacted
+    redaction_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    production_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class EDiscoveryRedaction(AumOSModel):
+    """PII redaction record for a document.
+
+    Stores non-destructive redaction coordinates so original content
+    can be recovered with appropriate authorization.
+
+    Table: lgl_redactions
+    """
+
+    __tablename__ = "lgl_redactions"
+
+    document_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    ediscovery_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    entity_counts: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    span_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    original_length: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    redacted_length: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    spans: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    redaction_method: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="presidio"
+    )  # presidio | pattern_fallback
+    is_reversible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class EDRMWorkflowRecord(AumOSModel):
+    """EDRM workflow progress record for a litigation matter.
+
+    Table: lgl_edrm_workflows
+    """
+
+    __tablename__ = "lgl_edrm_workflows"
+
+    case_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    case_number: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    matter_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    current_stage: Mapped[str] = mapped_column(String(50), nullable=False, default="identification")
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="active"
+    )  # active | completed | suspended
+    stages_completed: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    total_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    produced_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    workflow_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class JurisdictionRuleRecord(AumOSModel):
+    """Multi-jurisdictional privilege rule record.
+
+    Table: lgl_jurisdiction_rules
+    """
+
+    __tablename__ = "lgl_jurisdiction_rules"
+
+    jurisdiction_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    rule_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # attorney_client | work_product | common_interest | mediation
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    supersedes_rule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    citation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rule_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class CaseCitationRecord(AumOSModel):
+    """Case law citation retrieved from CourtListener or other sources.
+
+    Table: lgl_case_citations
+    """
+
+    __tablename__ = "lgl_case_citations"
+
+    case_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    case_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    citation: Mapped[str] = mapped_column(String(255), nullable=False)
+    court: Mapped[str] = mapped_column(String(100), nullable=False)
+    jurisdiction: Mapped[str] = mapped_column(String(50), nullable=False)
+    decision_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    docket_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    url: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="courtlistener")
+    search_query: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
 __all__ = [
     "PrivilegeCheck",
     "EDiscoveryJob",
     "AuditTrail",
     "PrivilegeLog",
     "LegalHold",
+    "TARProject",
+    "TARBatch",
+    "TARDocumentReview",
+    "LGLProductionSet",
+    "LGLProductionDocument",
+    "EDiscoveryRedaction",
+    "EDRMWorkflowRecord",
+    "JurisdictionRuleRecord",
+    "CaseCitationRecord",
 ]
